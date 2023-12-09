@@ -14,6 +14,13 @@
 
 #include "vfs.h"
 
+// Declaração da estrutura dos File Descriptors
+typedef struct fd {
+    int status;
+    int type;
+    char path[MAX_FILENAME_LENGTH + 1];
+} FD;
+
 //Funcao para instalar seu sistema de arquivos no S.O., registrando-o junto
 //ao virtual FS (vfs). Retorna um identificador unico (slot), caso
 //o sistema de arquivos tenha sido registrado com sucesso.

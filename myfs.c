@@ -19,6 +19,17 @@
 //...
 //...
 
+// Declaração do array de descritores de arquivo.
+extern FD fds[MAX_FDS];
+// Este array é utilizado para manter o controle dos descritores de arquivo abertos e de seu status.
+// Cada entrada no array corresponde a um descritor de arquivo.
+// O array é declarado como "extern" para indicar que sua definição real está localizada em outro arquivo, provavelmente em vfs.c ou em um arquivo similar.
+
+// Declaração do contador de descritores de arquivo.
+extern unsigned int fdc; // file descriptor counter (fdc)
+// Esta variável representa o número total de descritores de arquivo abertos.
+// Ela é declarada como "extern" para indicar que sua definição real está localizada em outro arquivo, provavelmente em vfs.c ou em um arquivo similar.
+ 
 
 //Funcao para verificacao se o sistema de arquivos está ocioso, ou seja,
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
@@ -40,7 +51,30 @@ int myFSFormat (Disk *d, unsigned int blockSize) {
 //criando o arquivo se nao existir. Retorna um descritor de arquivo,
 //em caso de sucesso. Retorna -1, caso contrario.
 int myFSOpen (Disk *d, const char *path) {
-	return -1;
+	if (d == NULL || path == NULL) {
+        return -1; // Argumentos inválidos
+    }
+
+    // Verificar se o arquivo já existe
+    int inodeNumber = vfsLookupPath(d, path);
+    if (inodeNumber < 0) {
+        // O arquivo não existe -> criar arquivo
+        inodeNumber = vfsCreateFile(d, path, FILETYPE_REGULAR);
+        if (inodeNumber < 0) {
+            // Erro ao criar o arquivo
+            return -1;
+        }
+    }
+
+    // Abrir o arquivo e obter um descritor de arquivo
+    int fd = vfsOpenFile(d, inodeNumber);
+    if (fd < 0) {
+        // Erro ao abrir o arquivo
+        return -1;
+    }
+
+    return fd;
+	//return -1;
 }
 	
 //Funcao para a leitura de um arquivo, a partir de um descritor de
@@ -62,7 +96,25 @@ int myFSWrite (int fd, const char *buf, unsigned int nbytes) {
 //Funcao para fechar um arquivo, a partir de um descritor de arquivo
 //existente. Retorna 0 caso bem sucedido, ou -1 caso contrario
 int myFSClose (int fd) {
-	return -1;
+	if (fd < 1 || fd > MAX_FDS || fds[fd - 1].status == 0) {
+        return -1; // Descritor de arquivo inválido
+    }
+
+    // Descritor de arquivo inválido
+    int result = vfsClose(fd);
+    if (result < 0) {
+        // Erro ao fechar o arquivo
+        return -1;
+    }
+
+    // Atualizar o status do descritor de arquivo
+    fds[fd - 1].status = 0;
+    fds[fd - 1].type = 0;
+    strcpy(fds[fd - 1].path, "");
+    fdc--;
+
+    return 0; // Successo
+	//return -1;
 }
 
 //Funcao para abertura de um diretorio, a partir do caminho
@@ -111,5 +163,35 @@ int myFSCloseDir (int fd) {
 //o sistema de arquivos tenha sido registrado com sucesso.
 //Caso contrario, retorna -1
 int installMyFS (void) {
-	return -1;
+	// Função para configurações ou tarefas de inicialização (inicializar estruturas de dados, alocar memória...)
+
+    // Exemplo: montando um sistema de arquivos em um disco
+    Disk *myDisk = diskConnect(0, "exemplo.dsk");
+    if (myDisk == NULL) {
+        // Falha ao se conectar ao disco
+        return -1;
+    }
+
+    // Formatar o sistema de arquivos no disco
+    // Escolha do tamanho do bloco
+    int blockSize = 512; 
+	// Escolha do ID do sistema de arquivos
+    int filesystemId = 1; 
+    if (vfsFormat(myDisk, blockSize, filesystemId) == -1) {
+        // Falha ao formatar o sistema de arquivos
+        diskDisconnect(myDisk);
+        return -1;
+    }
+
+    // Montando o sistema de arquivos como o sistema de arquivos raiz
+    if (vfsMountRoot(myDisk, filesystemId) == -1) {
+        // Falha ao montar o sistema de arquivos raiz
+        diskDisconnect(myDisk);
+        return -1;
+    }
+
+    // Tarefas adicionais de configuração podem ser realizadas aqui
+
+    return 0; // Successo
+	//return -1;
 }
