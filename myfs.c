@@ -16,7 +16,18 @@
 #include "util.h"
 
 //Declaracoes globais
-//...
+struct File
+{
+  Disk *disk;
+  Inode *inode;
+  unsigned int size;
+  unsigned int lastByteRead;
+  const char *path;
+  unsigned int fd;
+
+};
+typedef struct File File;
+File *files[MAX_FDS] = {NULL};
 //...
 
 
@@ -24,7 +35,10 @@
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
 //um positivo se ocioso ou, caso contrario, 0.
 int myFSIsIdle (Disk *d) {
-	return 0;
+	for(int i = 0; i < MAX_FDS; i++){
+		if(files[i] != NULL && diskGetId(d) == diskGetId(files[i]->disk)) {return 0;}
+	}
+	return 1;
 }
 
 //Funcao para formatacao de um disco com o novo sistema de arquivos
