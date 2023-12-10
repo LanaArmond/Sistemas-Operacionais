@@ -32,7 +32,7 @@ File *files[MAX_FDS] = {NULL};
 
 File* getFile(Disk *d, const char* path){
 	for (int i = 0; i < MAX_FDS; i++){
-		if(files[i] != NULL && diskGetId(d) == diskGetId(files[i]->disk) && strcmp(files[i]->path, path)){
+		if(files[i] != NULL && diskGetId(d) == diskGetId(files[i]->disk) && strcmp(files[i]->path, path) == 0){
 			return files[i];
 		}
 	}
