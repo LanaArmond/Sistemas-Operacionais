@@ -30,6 +30,15 @@ typedef struct File File;
 File *files[MAX_FDS] = {NULL};
 //...
 
+File* getFile(Disk *d, const char* path){
+	for (int i = 0; i < MAX_FDS; i++){
+		if(files[i] != NULL && diskGetId(d) == diskGetId(files[i]->disk) && strcmp(files[i]->path, path)){
+			return files[i];
+		}
+	}
+	return NULL;
+}
+
 
 //Funcao para verificacao se o sistema de arquivos está ocioso, ou seja,
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
