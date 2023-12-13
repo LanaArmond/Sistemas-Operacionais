@@ -45,8 +45,51 @@ int myFSIsIdle (Disk *d) {
 //com tamanho de blocos igual a blockSize. Retorna o numero total de
 //blocos disponiveis no disco, se formatado com sucesso. Caso contrario,
 //retorna -1.
-int myFSFormat (Disk *d, unsigned int blockSize) {
-	return -1;
+int myFSFormat(Disk *disk, unsigned int blockSize) {
+    // Superblock inicializado com zeros
+    unsigned char superblock[DISK_SECTORDATASIZE] = {0};
+
+    // Configuração do tamanho do bloco no superblock
+    ul2char(blockSize, &superblock[SUPERBLOCK_BLOCKSIZE]);
+    // Atribuição do ID do sistema de arquivos
+    superblock[SUPERBLOCK_FSID] = myfsInfo.fsid;
+
+    // Cálculo do número de inodes com base no tamanho do disco e do bloco
+    unsigned int numInodes = (diskGetSize(disk) / blockSize) / 8;
+
+    // Loop para criar inodes e liberar memória associada
+    for (unsigned int i = 1; i <= numInodes; i++) {
+        Inode *inode = inodeCreate(i, disk);
+        if (inode == NULL) return -1;
+        free(inode);
+    }
+
+    // Cálculo de informações sobre o espaço livre
+    unsigned int freeSpaceSector = inodeAreaBeginSector() + numInodes / inodeNumInodesPerSector();
+    unsigned int freeSpaceSize = (diskGetSize(disk) / blockSize) / (sizeof(unsigned char) * 8 * DISK_SECTORDATASIZE);
+
+    // Configuração do setor de espaço livre no superblock
+    ul2char(freeSpaceSector, &superblock[SUPERBLOCK_FREE_SPACE_SECTOR]);
+
+    // Cálculo do setor do primeiro bloco e do número total de blocos
+    unsigned int firstBlockSector = freeSpaceSector + freeSpaceSize;
+    unsigned int numBlocks = (diskGetNumSectors(disk) - firstBlockSector) / (blockSize / DISK_SECTORDATASIZE);
+
+    // Configuração do setor do primeiro bloco e do número total de blocos no superblock
+    ul2char(firstBlockSector, &superblock[SUPERBLOCK_FIRST_BLOCK_SECTOR]);
+    ul2char(numBlocks, &superblock[SUPERBLOCK_NUM_BLOCKS]);
+
+    // Escrita do superblock no setor 0
+    diskWriteSector(disk, 0, superblock);
+
+    // Preenchimento dos setores de espaço livre com zeros
+    unsigned char freeSpace[DISK_SECTORDATASIZE] = {0};
+    for (unsigned int i = 0; i < freeSpaceSize; i++) {
+        diskWriteSector(disk, freeSpaceSector + i, freeSpace);
+    }
+
+    // Retorno do número de blocos ou -1 se não houver blocos disponíveis
+    return numBlocks > 0 ? numBlocks : -1;
 }
 
 //Funcao para abertura de um arquivo, a partir do caminho especificado
