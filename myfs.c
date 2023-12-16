@@ -10,33 +10,46 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
 #include "myfs.h"
 #include "vfs.h"
 #include "inode.h"
 #include "util.h"
 
-//Declaracoes globais
+#define SUPER_NUM_BLOCKS (3 * sizeof(unsigned int) + sizeof(char))
+#define SUPER_BLOCKSIZE 0
+#define SUPER_FREE_SPACE_SECTOR (sizeof(unsigned int) + sizeof(char))
+#define SUPER_FIRST_BLOCK_SECTOR (2 * sizeof(unsigned int) + sizeof(char))
+
 struct File
 {
   Disk *disk;
   Inode *inode;
-  unsigned int size;
+  unsigned int blocksize;
   unsigned int lastByteRead;
   const char *path;
   unsigned int fd;
-
 };
-typedef struct File File;
+
+//Declaracoes globais
+char fsid = 5;
+char *fsname = "rayssa";
+
+int myFSslot;
 File *files[MAX_FDS] = {NULL};
-//...
 
 
 //Funcao para verificacao se o sistema de arquivos está ocioso, ou seja,
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
 //um positivo se ocioso ou, caso contrario, 0.
 int myFSIsIdle (Disk *d) {
-	for(int i = 0; i < MAX_FDS; i++){
-		if(files[i] != NULL && diskGetId(d) == diskGetId(files[i]->disk)) {return 0;}
+	for (int i = 0; i < MAX_FDS; i++)
+	{
+		if (files[i] != NULL && diskGetId(d) == diskGetId(files[i]->disk))
+		{
+			return 0;
+		}
 	}
 	return 1;
 }
@@ -46,50 +59,36 @@ int myFSIsIdle (Disk *d) {
 //blocos disponiveis no disco, se formatado com sucesso. Caso contrario,
 //retorna -1.
 int myFSFormat(Disk *disk, unsigned int blockSize) {
-    // Superblock inicializado com zeros
-    unsigned char superblock[DISK_SECTORDATASIZE] = {0};
+     unsigned char superblock[DISK_SECTORDATASIZE] = {0};
 
-    // Configuração do tamanho do bloco no superblock
-    ul2char(blockSize, &superblock[SUPERBLOCK_BLOCKSIZE]);
-    // Atribuição do ID do sistema de arquivos
-    superblock[SUPERBLOCK_FSID] = myfsInfo.fsid;
+    ul2char(blockSize,&superblock[SUPER_BLOCKSIZE]);//funçao para conversao de um unsigned int para um array de bytes
 
-    // Cálculo do número de inodes com base no tamanho do disco e do bloco
-    unsigned int numInodes = (diskGetSize(disk) / blockSize) / 8;
+    unsigned int numInodes = (diskGetSize(d) / blockSize ) / 8;
 
-    // Loop para criar inodes e liberar memória associada
-    for (unsigned int i = 1; i <= numInodes; i++) {
-        Inode *inode = inodeCreate(i, disk);
-        if (inode == NULL) return -1;
-        free(inode);
-    }
-
-    // Cálculo de informações sobre o espaço livre
     unsigned int freeSpaceSector = inodeAreaBeginSector() + numInodes / inodeNumInodesPerSector();
-    unsigned int freeSpaceSize = (diskGetSize(disk) / blockSize) / (sizeof(unsigned char) * 8 * DISK_SECTORDATASIZE);
+    unsigned int freeSpaceSize = (diskGetSize(d) / blockSize) / (sizeof(unsigned char) * 8 * DISK_SECTORDATASIZE);
 
-    // Configuração do setor de espaço livre no superblock
-    ul2char(freeSpaceSector, &superblock[SUPERBLOCK_FREE_SPACE_SECTOR]);
+    ul2char(freeSpaceSector, &superblock[SUPER_FREE_SPACE_SECTOR]);
 
-    // Cálculo do setor do primeiro bloco e do número total de blocos
     unsigned int firstBlockSector = freeSpaceSector + freeSpaceSize;
-    unsigned int numBlocks = (diskGetNumSectors(disk) - firstBlockSector) / (blockSize / DISK_SECTORDATASIZE);
+    unsigned int numBlocks = (diskGetNumSectors(d) - firstBlockSector) / (blockSize / DISK_SECTORDATASIZE);
 
-    // Configuração do setor do primeiro bloco e do número total de blocos no superblock
-    ul2char(firstBlockSector, &superblock[SUPERBLOCK_FIRST_BLOCK_SECTOR]);
-    ul2char(numBlocks, &superblock[SUPERBLOCK_NUM_BLOCKS]);
+    ul2char(firstBlockSector, &superblock[SUPER_FIRST_BLOCK_SECTOR]);
+    ul2char(numBlocks, &superblock[SUPER_NUM_BLOCKS]);
 
-    // Escrita do superblock no setor 0
-    diskWriteSector(disk, 0, superblock);
+    if(diskWriteSector(d, 0, superblock) == -1)
+      return -1;
 
-    // Preenchimento dos setores de espaço livre com zeros
     unsigned char freeSpace[DISK_SECTORDATASIZE] = {0};
-    for (unsigned int i = 0; i < freeSpaceSize; i++) {
-        diskWriteSector(disk, freeSpaceSector + i, freeSpace);
-    }
+      for(int i=0; i<freeSpaceSize ; i++)
+      {
+        if(diskWriteSector(d, freeSpaceSector + i, freeSpace) == -1)
+        {
+          return -1;
+        }
+      }
 
-    // Retorno do número de blocos ou -1 se não houver blocos disponíveis
-    return numBlocks > 0 ? numBlocks : -1;
+      return numBlocks > 0 ? numBlocks : -1;
 }
 
 //Funcao para abertura de um arquivo, a partir do caminho especificado
@@ -168,5 +167,15 @@ int myFSCloseDir (int fd) {
 //o sistema de arquivos tenha sido registrado com sucesso.
 //Caso contrario, retorna -1
 int installMyFS (void) {
-	return -1;
+	FSInfo *fs_info = (FSInfo*)malloc(sizeof(FSInfo));
+    fs_info->fsname = fsname;
+    fs_info->fsid = fsid;
+    fs_info->closeFn = myFSClose;
+    fs_info->formatFn = myFSFormat;
+    fs_info->isidleFn = myFSIsIdle;
+    fs_info->openFn = myFSOpen;
+    fs_info->readFn = myFSRead;
+    fs_info->writeFn = myFSWrite;
+    myFSslot = vfsRegisterFS(fs_info);
+    return myFSslot;
 }

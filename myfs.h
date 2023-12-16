@@ -13,6 +13,19 @@
 #define MYFS_H
 
 #include "vfs.h"
+#include "disk.h"
+#include "inode.h"
+#include "util.h"
+
+typedef struct
+{
+  Disk *disk;
+  Inode *inode;
+  unsigned int blocksize;
+  unsigned int lastByteRead;
+  const char *path;
+  unsigned int fd;
+} File;
 
 //Funcao para instalar seu sistema de arquivos no S.O., registrando-o junto
 //ao virtual FS (vfs). Retorna um identificador unico (slot), caso
