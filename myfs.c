@@ -58,7 +58,7 @@ int myFSIsIdle (Disk *d) {
 //com tamanho de blocos igual a blockSize. Retorna o numero total de
 //blocos disponiveis no disco, se formatado com sucesso. Caso contrario,
 //retorna -1.
-int myFSFormat(Disk *disk, unsigned int blockSize) {
+int myFSFormat(Disk *d, unsigned int blockSize) {
      unsigned char superblock[DISK_SECTORDATASIZE] = {0};
 
     ul2char(blockSize,&superblock[SUPER_BLOCKSIZE]);//funçao para conversao de um unsigned int para um array de bytes
