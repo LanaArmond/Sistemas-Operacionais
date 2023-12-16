@@ -7,3 +7,13 @@ ___
 * Gabriella Cruz e Silva ( )
 * Rayssa Amaral ( )
 * Davi Kirchmaier ( )
+
+## Como rodar:
+
+1) gcc -c *.c
+2) gcc *.o -o main
+3) ./main
+
+## Observações
+
+* Criar o disco (64cyl.dsk), formatar e montar o sistema nele

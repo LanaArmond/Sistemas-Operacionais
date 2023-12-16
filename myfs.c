@@ -1,7 +1,10 @@
 /*
 *  myfs.c - Implementacao do sistema de arquivos MyFS
 *
-*  Autores: SUPER_PROGRAMADORES_C
+*  Autores: Ana Beatriz Lana M. M. Armond (202165501B)
+            Davi Kirchmaier ( )
+            Gabriella Cruz e Silva ( )
+            Rayssa Amaral ( )
 *  Projeto: Trabalho Pratico II - Sistemas Operacionais
 *  Organizacao: Universidade Federal de Juiz de Fora
 *  Departamento: Dep. Ciencia da Computacao
@@ -10,40 +13,96 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "myfs.h"
 #include "vfs.h"
 #include "inode.h"
 #include "util.h"
 
-//Declaracoes globais
-//...
-//...
+// Declarações Globais
 
-// Declaração do array de descritores de arquivo.
-extern FD fds[MAX_FDS];
-// Este array é utilizado para manter o controle dos descritores de arquivo abertos e de seu status.
-// Cada entrada no array corresponde a um descritor de arquivo.
-// O array é declarado como "extern" para indicar que sua definição real está localizada em outro arquivo, provavelmente em vfs.c ou em um arquivo similar.
+extern MyFDFILE fds[MAX_FDS];
+extern unsigned int fdc;  // file descriptor counter
 
-// Declaração do contador de descritores de arquivo.
-extern unsigned int fdc; // file descriptor counter (fdc)
-// Esta variável representa o número total de descritores de arquivo abertos.
-// Ela é declarada como "extern" para indicar que sua definição real está localizada em outro arquivo, provavelmente em vfs.c ou em um arquivo similar.
+struct File
+{
+  Disk *disk;
+  Inode *inode;
+  unsigned int blocksize;
+  unsigned int lastByteRead;
+  const char *path;
+  unsigned int fd;
+};
+
+char fsid = 5;
+char *fsname = "Matrix";
+
+int myFSslot;
+File *files[MAX_FDS] = {NULL};
+
+#define SUPER_NUM_BLOCKS (3 * sizeof(unsigned int) + sizeof(char))
+#define SUPER_BLOCKSIZE 0
+#define SUPER_FREE_SPACE_SECTOR (sizeof(unsigned int) + sizeof(char))
+#define SUPER_FIRST_BLOCK_SECTOR (2 * sizeof(unsigned int) + sizeof(char))
+
+
+// _______________________________ Funções Auxiliares _______________________________ //
+
+
+// ___________________________ Fim das Funções Auxiliares ___________________________ //
  
 
 //Funcao para verificacao se o sistema de arquivos está ocioso, ou seja,
 //se nao ha quisquer descritores de arquivos em uso atualmente. Retorna
 //um positivo se ocioso ou, caso contrario, 0.
 int myFSIsIdle (Disk *d) {
-	return 0;
+	for (int i = 0; i < MAX_FDS; i++)
+	{
+		if (files[i] != NULL && diskGetId(d) == diskGetId(files[i]->disk))
+		{
+			return 0;
+		}
+	}
+	return 1;
 }
 
 //Funcao para formatacao de um disco com o novo sistema de arquivos
 //com tamanho de blocos igual a blockSize. Retorna o numero total de
 //blocos disponiveis no disco, se formatado com sucesso. Caso contrario,
 //retorna -1.
-int myFSFormat (Disk *d, unsigned int blockSize) {
-	return -1;
+int myFSFormat(Disk *d, unsigned int blockSize) {
+    unsigned char superblock[DISK_SECTORDATASIZE] = {0};
+
+    ul2char(blockSize, &superblock[SUPER_BLOCKSIZE]); // Conversão de um unsigned int para um array de bytes
+
+    unsigned int numInodes = (diskGetSize(d) / blockSize ) / 8;
+
+    unsigned int freeSpaceSector = inodeAreaBeginSector() + numInodes / inodeNumInodesPerSector();
+    unsigned int freeSpaceSize = (diskGetSize(d) / blockSize) / (sizeof(unsigned char) * 8 * DISK_SECTORDATASIZE);
+
+    ul2char(freeSpaceSector, &superblock[SUPER_FREE_SPACE_SECTOR]);
+
+    unsigned int firstBlockSector = freeSpaceSector + freeSpaceSize;
+    unsigned int numBlocks = (diskGetNumSectors(d) - firstBlockSector) / (blockSize / DISK_SECTORDATASIZE);
+
+    ul2char(firstBlockSector, &superblock[SUPER_FIRST_BLOCK_SECTOR]);
+    ul2char(numBlocks, &superblock[SUPER_NUM_BLOCKS]);
+
+    if(diskWriteSector(d, 0, superblock) == -1)
+    {
+        return -1;
+    }
+      
+    unsigned char freeSpace[DISK_SECTORDATASIZE] = {0};
+      for(int i=0; i<freeSpaceSize ; i++)
+      {
+        if(diskWriteSector(d, freeSpaceSector + i, freeSpace) == -1)
+        {
+          return -1;
+        }
+      }
+
+      return numBlocks > 0 ? numBlocks : -1;
 }
 
 //Funcao para abertura de um arquivo, a partir do caminho especificado
@@ -51,30 +110,30 @@ int myFSFormat (Disk *d, unsigned int blockSize) {
 //criando o arquivo se nao existir. Retorna um descritor de arquivo,
 //em caso de sucesso. Retorna -1, caso contrario.
 int myFSOpen (Disk *d, const char *path) {
-	if (d == NULL || path == NULL) {
-        return -1; // Argumentos inválidos
-    }
+  if (d == NULL || path == NULL) {
+      return -1; // Argumentos inválidos
+  }
 
-    // Verificar se o arquivo já existe
-    int inodeNumber = vfsLookupPath(d, path);
-    if (inodeNumber < 0) {
-        // O arquivo não existe -> criar arquivo
-        inodeNumber = vfsCreateFile(d, path, FILETYPE_REGULAR);
-        if (inodeNumber < 0) {
-            // Erro ao criar o arquivo
-            return -1;
-        }
-    }
+  // Verificar se o arquivo já existe
+  int inodeNumber = vfsLookupPath(d, path);
+  if (inodeNumber < 0) {
+      // O arquivo não existe -> criar arquivo
+      inodeNumber = vfsCreateFile(d, path, FILETYPE_REGULAR);
+      if (inodeNumber < 0) {
+          // Erro ao criar o arquivo
+          return -1;
+      }
+  }
 
-    // Abrir o arquivo e obter um descritor de arquivo
-    int fd = vfsOpenFile(d, inodeNumber);
-    if (fd < 0) {
-        // Erro ao abrir o arquivo
-        return -1;
-    }
+  // Abrir o arquivo e obter um descritor de arquivo
+  int fd = vfsOpenFile(d, inodeNumber);
+  if (fd < 0) {
+      // Erro ao abrir o arquivo
+      return -1;
+  }
 
-    return fd;
-	//return -1;
+  return fd;
+//return -1;
 }
 	
 //Funcao para a leitura de um arquivo, a partir de um descritor de
@@ -82,7 +141,52 @@ int myFSOpen (Disk *d, const char *path) {
 //tamanho maximo de nbytes. Retorna o numero de bytes efetivamente
 //lidos em caso de sucesso ou -1, caso contrario.
 int myFSRead (int fd, char *buf, unsigned int nbytes) {
-	return -1;
+	if(fd < 0 || fd >= MAX_FDS) 
+  {
+    return -1;
+  }
+
+  File* file = files[fd];
+  if(file == NULL)
+  {
+    return -1;
+  }
+      
+  unsigned int fileSize = inodeGetFileSize(file->inode);
+  unsigned int bytesRead = 0;
+  unsigned int currentInodeBlockNumber = file->lastByteRead / file->blocksize;
+  unsigned int offset = file->lastByteRead % file->blocksize;
+  unsigned int currentBlock = inodeGetBlockAddr(file->inode, currentInodeBlockNumber);
+  unsigned char diskBuffer[DISK_SECTORDATASIZE];
+
+    while(bytesRead < nbytes && bytesRead + file->lastByteRead < fileSize && currentBlock > 0) 
+    {
+        unsigned int sectorsPerBlock = file->blocksize / DISK_SECTORDATASIZE;
+        unsigned int firstSector = offset / DISK_SECTORDATASIZE;
+        unsigned int firstByteInSector = offset % DISK_SECTORDATASIZE;
+
+        for(int i = firstSector; i < sectorsPerBlock && bytesRead < nbytes; i++) 
+        {
+            if(diskReadSector(file->disk, currentBlock + i, diskBuffer) == -1)
+                return -1;
+
+            for(int j = firstByteInSector;  j < DISK_SECTORDATASIZE && bytesRead < nbytes && bytesRead + file->lastByteRead < fileSize;  j++) 
+            {
+                buf[bytesRead] = diskBuffer[j];
+                bytesRead++;
+            }
+
+            firstByteInSector = 0;
+        }
+
+        offset = 0;
+        currentInodeBlockNumber++;
+        currentBlock = inodeGetBlockAddr(file->inode, currentInodeBlockNumber);
+    }
+
+    file->lastByteRead += bytesRead;
+
+    return bytesRead;
 }
 
 //Funcao para a escrita de um arquivo, a partir de um descritor de
@@ -90,40 +194,38 @@ int myFSRead (int fd, char *buf, unsigned int nbytes) {
 //terao tamanho maximo de nbytes. Retorna o numero de bytes
 //efetivamente escritos em caso de sucesso ou -1, caso contrario
 int myFSWrite (int fd, const char *buf, unsigned int nbytes) {
-	return -1;
+	 return -1;
 }
 
 //Funcao para fechar um arquivo, a partir de um descritor de arquivo
 //existente. Retorna 0 caso bem sucedido, ou -1 caso contrario
 int myFSClose (int fd) {
-	if (fd < 1 || fd > MAX_FDS || fds[fd - 1].status == 0) {
-        return -1; // Descritor de arquivo inválido
-    }
+  if(fd <= 0 || fd > MAX_FDS)
+  {
+    return -1;
+  }
 
-    // Descritor de arquivo inválido
-    int result = vfsClose(fd);
-    if (result < 0) {
-        // Erro ao fechar o arquivo
-        return -1;
-    }
+  File *file = files[fd];
 
-    // Atualizar o status do descritor de arquivo
-    fds[fd - 1].status = 0;
-    fds[fd - 1].type = 0;
-    strcpy(fds[fd - 1].path, "");
-    fdc--;
+  if(!file)
+  {
+    return -1;
+  }
 
-    return 0; // Successo
-	//return -1;
+  files[fd - 1] = NULL;
+  free(file->inode);
+  free(file);
+
+  return 0;
 }
 
 //Funcao para abertura de um diretorio, a partir do caminho
 //especificado em path, no disco indicado por d, no modo Read/Write,
 //criando o diretorio se nao existir. Retorna um descritor de arquivo,
 //em caso de sucesso. Retorna -1, caso contrario.
-int myFSOpenDir (Disk *d, const char *path) {
-	return -1;
-}
+// int myFSOpenDir (Disk *d, const char *path) {
+// 	return -1;
+// }
 
 //Funcao para a leitura de um diretorio, identificado por um descritor
 //de arquivo existente. Os dados lidos correspondem a uma entrada de
@@ -132,66 +234,57 @@ int myFSOpenDir (Disk *d, const char *path) {
 //O numero do inode correspondente 'a entrada e' copiado para inumber.
 //Retorna 1 se uma entrada foi lida, 0 se fim de diretorio ou -1 caso
 //mal sucedido
-int myFSReadDir (int fd, char *filename, unsigned int *inumber) {
-	return -1;
-}
+// int myFSReadDir (int fd, char *filename, unsigned int *inumber) {
+// 	return -1;
+// }
 
 //Funcao para adicionar uma entrada a um diretorio, identificado por um
 //descritor de arquivo existente. A nova entrada tera' o nome indicado
 //por filename e apontara' para o numero de i-node indicado por inumber.
 //Retorna 0 caso bem sucedido, ou -1 caso contrario.
-int myFSLink (int fd, const char *filename, unsigned int inumber) {
-	return -1;
-}
+// int myFSLink (int fd, const char *filename, unsigned int inumber) {
+// 	return -1;
+// }
 
 //Funcao para remover uma entrada existente em um diretorio, 
 //identificado por um descritor de arquivo existente. A entrada e'
 //identificada pelo nome indicado em filename. Retorna 0 caso bem
 //sucedido, ou -1 caso contrario.
-int myFSUnlink (int fd, const char *filename) {
-	return -1;
-}
+// int myFSUnlink (int fd, const char *filename) {
+// 	return -1;
+// }
 
 //Funcao para fechar um diretorio, identificado por um descritor de
 //arquivo existente. Retorna 0 caso bem sucedido, ou -1 caso contrario.	
-int myFSCloseDir (int fd) {
-	return -1;
-}
+// int myFSCloseDir (int fd) {
+// 	return -1;
+// }
 
 //Funcao para instalar seu sistema de arquivos no S.O., registrando-o junto
 //ao virtual FS (vfs). Retorna um identificador unico (slot), caso
 //o sistema de arquivos tenha sido registrado com sucesso.
 //Caso contrario, retorna -1
 int installMyFS (void) {
-	// Função para configurações ou tarefas de inicialização (inicializar estruturas de dados, alocar memória...)
-
-    // Exemplo: montando um sistema de arquivos em um disco
-    Disk *myDisk = diskConnect(0, "exemplo.dsk");
-    if (myDisk == NULL) {
-        // Falha ao se conectar ao disco
-        return -1;
-    }
-
-    // Formatar o sistema de arquivos no disco
-    // Escolha do tamanho do bloco
-    int blockSize = 512; 
-	// Escolha do ID do sistema de arquivos
-    int filesystemId = 1; 
-    if (vfsFormat(myDisk, blockSize, filesystemId) == -1) {
-        // Falha ao formatar o sistema de arquivos
-        diskDisconnect(myDisk);
-        return -1;
-    }
-
-    // Montando o sistema de arquivos como o sistema de arquivos raiz
-    if (vfsMountRoot(myDisk, filesystemId) == -1) {
-        // Falha ao montar o sistema de arquivos raiz
-        diskDisconnect(myDisk);
-        return -1;
-    }
-
-    // Tarefas adicionais de configuração podem ser realizadas aqui
-
-    return 0; // Successo
-	//return -1;
+	// FSInfo *fs_info = (FSInfo*)malloc(sizeof(FSInfo));
+  //   fs_info->fsname = fsname;
+  //   fs_info->fsid = fsid;
+  //   fs_info->closeFn = myFSClose;
+  //   fs_info->formatFn = myFSFormat;
+  //   fs_info->isidleFn = myFSIsIdle;
+  //   fs_info->openFn = myFSOpen;
+  //   fs_info->readFn = myFSRead;
+  //   fs_info->writeFn = myFSWrite;
+  //   myFSslot = vfsRegisterFS(fs_info);
+  //   return myFSslot;
+  FSInfo *fs_info = (FSInfo *)malloc(sizeof(FSInfo));
+    fs_info->fsname = fsname;
+    fs_info->fsid = fsid;
+    fs_info->closeFn = myFSClose;
+    fs_info->formatFn = myFSFormat;
+    fs_info->isidleFn = myFSIsIdle;
+    fs_info->openFn = myFSOpen;
+    fs_info->readFn = myFSRead;
+    fs_info->writeFn = myFSWrite;
+    myFSslot = vfsRegisterFS(fs_info);
+    return myFSslot;
 }
