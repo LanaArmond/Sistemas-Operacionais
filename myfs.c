@@ -21,8 +21,66 @@
 
 // Declarações Globais
 
-extern MyFDFILE fds[MAX_FDS];
-extern unsigned int fdc;  // file descriptor counter
+// struct filedescriptor
+// {
+//   int status;
+//   int type;
+//   unsigned int fd;
+//   unsigned int pointer;
+//   Disk *disk;
+//   Inode *inode;
+//   const char *path;
+// }; typedef struct filedescriptor FileDescriptor;
+// FileDescriptor *fileDescriptors[MAX_FDS];
+
+char fsid = 5;
+char *fsname = "Matrix";
+
+int myFSslot;
+File *files[MAX_FDS] = {NULL};
+
+// Variáveis Globais
+
+#define SUPER_NUM_BLOCKS (3 * sizeof(unsigned int) + sizeof(char))
+#define SUPER_BLOCKSIZE 0
+#define SUPER_FREE_SPACE_SECTOR (sizeof(unsigned int) + sizeof(char))
+#define SUPER_FIRST_BLOCK_SECTOR (2 * sizeof(unsigned int) + sizeof(char))
+
+#define MAX_INODES_COUNT 1024
+#define MAX_FILENAME_SIZE 255
+#define MAX_DIR_ENTRIES 1024
+#define MAX_OPEN_FILE_LIMIT 1024
+Disk *atualDisk;
+
+// Structs
+
+typedef struct {
+  Inode *inodes[MAX_INODES_COUNT];
+  int used[MAX_INODES_COUNT];
+} Inodes;
+Inodes inodes;
+
+typedef struct {
+  char fileName[MAX_FILENAME_SIZE];
+  unsigned int inodeNumber;
+} DirectoryEntry;
+
+typedef struct {
+  DirectoryEntry entries[MAX_DIR_ENTRIES];
+  int numberOfEntries;
+} Directory;
+Directory root;
+
+typedef struct {
+  int status; // 1 = arquivo aberto / 0 = arquivo fechado
+  int type;
+  unsigned int fd;
+  unsigned int pointer;
+  Disk *disk;
+  Inode *inode;
+  const char *path;
+} FileDescriptor;
+FileDescriptor fileDescriptors[MAX_FDS];
 
 struct File
 {
@@ -34,20 +92,33 @@ struct File
   unsigned int fd;
 };
 
-char fsid = 5;
-char *fsname = "Matrix";
-
-int myFSslot;
-File *files[MAX_FDS] = {NULL};
-
-#define SUPER_NUM_BLOCKS (3 * sizeof(unsigned int) + sizeof(char))
-#define SUPER_BLOCKSIZE 0
-#define SUPER_FREE_SPACE_SECTOR (sizeof(unsigned int) + sizeof(char))
-#define SUPER_FIRST_BLOCK_SECTOR (2 * sizeof(unsigned int) + sizeof(char))
-
 
 // _______________________________ Funções Auxiliares _______________________________ //
 
+int addDirectoryEntry(Directory *dir, const char *path, unsigned int numInode) {
+  if (dir == NULL || path == NULL || dir->numberOfEntries >= MAX_DIR_ENTRIES) {
+    return -1; // Parâmetros inválidos ou diretório cheio
+  }
+
+  strcpy(dir->entries[dir->numberOfEntries].fileName, path);
+  dir->entries[dir->numberOfEntries].inodeNumber = numInode;
+  dir->numberOfEntries++;
+
+  return 0; // Sucesso
+}
+
+Inode *createInode(Disk *d) {
+  if (d == NULL) {
+    return NULL; // Parâmetro inválido
+  }
+
+  Inode *newInode = inodeCreate(inodeFindFreeInode(0, d), d);
+  if (newInode == NULL) {
+    return NULL; // Falha ao criar novo inode
+  }
+
+  return newInode;
+}
 
 // ___________________________ Fim das Funções Auxiliares ___________________________ //
  
@@ -110,30 +181,54 @@ int myFSFormat(Disk *d, unsigned int blockSize) {
 //criando o arquivo se nao existir. Retorna um descritor de arquivo,
 //em caso de sucesso. Retorna -1, caso contrario.
 int myFSOpen (Disk *d, const char *path) {
-  if (d == NULL || path == NULL) {
+  if (d == NULL || path == NULL) 
+  {
       return -1; // Argumentos inválidos
   }
+  atualDisk = d; 
 
-  // Verificar se o arquivo já existe
-  int inodeNumber = vfsLookupPath(d, path);
-  if (inodeNumber < 0) {
-      // O arquivo não existe -> criar arquivo
-      inodeNumber = vfsCreateFile(d, path, FILETYPE_REGULAR);
-      if (inodeNumber < 0) {
-          // Erro ao criar o arquivo
-          return -1;
-      }
-  }
+	// Procura se o arquivo já existe
+	int fileIndex = -1;
+	for (int i = 0; i < root.numberOfEntries; i++)
+	{
+		if (strcmp(root.entries[i].fileName, path) == 0)
+		{
+			fileIndex = i;
+			break;
+		}
+	}
 
-  // Abrir o arquivo e obter um descritor de arquivo
-  int fd = vfsOpenFile(d, inodeNumber);
-  if (fd < 0) {
-      // Erro ao abrir o arquivo
-      return -1;
-  }
+	if (fileIndex == -1)
+	{
+		// O arquivo não existe, então cria um novo
+		Inode *newInode = createInode(d);
+		if (newInode == NULL)
+		{
+			return -1; // Falha ao criar um novo inode
+		}
 
-  return fd;
-//return -1;
+		int numInode = inodeGetNumber(newInode);
+
+		if (addDirectoryEntry(&root, path, numInode) == -1)
+		{
+			return -1; // Falha ao adicionar a entrada no diretório
+		}
+
+		fileIndex = root.numberOfEntries - 1;
+	}
+
+	// Encontra um descritor de arquivo livre
+	for (int i = 1; i < MAX_FDS - 1; i++)
+	{
+		if (!fileDescriptors[i].status)
+		{
+			fileDescriptors[i].inode = inodeLoad(root.entries[fileIndex].inodeNumber, d);
+			fileDescriptors[i].status = 1;
+			return i; // Retorna o índice do descritor de arquivo
+		}
+	}
+
+	return -1; // Todos os descritores de arquivo estão em uso
 }
 	
 //Funcao para a leitura de um arquivo, a partir de um descritor de
@@ -194,16 +289,26 @@ int myFSRead (int fd, char *buf, unsigned int nbytes) {
 //terao tamanho maximo de nbytes. Retorna o numero de bytes
 //efetivamente escritos em caso de sucesso ou -1, caso contrario
 int myFSWrite (int fd, const char *buf, unsigned int nbytes) {
-	 return -1;
+	//  if(fileDescriptors[fd] == NULL || fileDescriptors[fd]->status == 0)
+  //  {
+  //     // O arquivo não está aberto
+  //     return -1;
+  //  }
+    
 }
 
 //Funcao para fechar um arquivo, a partir de um descritor de arquivo
 //existente. Retorna 0 caso bem sucedido, ou -1 caso contrario
 int myFSClose (int fd) {
-  if(fd <= 0 || fd > MAX_FDS)
-  {
-    return -1;
-  }
+  // if(fd <= 0 || fd > MAX_FDS)
+  // {
+  //   return -1;
+  // }
+  // if(fileDescriptors[fd] == NULL || fileDescriptors[fd]->status == 0)
+  // {
+  //   // Já está fechado
+  //   return -1;
+  // }
 
   File *file = files[fd];
 
