@@ -45,7 +45,7 @@ char *fsname = "Matrix";
 
 // Declarações Globais
 FSInfo *fsInfo;
-File *files[MAX_FDS] = {NULL};
+File *files[MAX_FDS];
 int myFSslot;
 
 // _______________________________ Funções Auxiliares _______________________________ //
@@ -130,7 +130,7 @@ unsigned int findFreeBlock(Disk *disk)
 	return -1;
 }
 
-boolean setBlockFree(Disk *d, unsigned int block)
+bool setBlockFree(Disk *d, unsigned int block)
 {
 	unsigned char buffer[DISK_SECTORDATASIZE];
 	if (diskReadSector(d, 0, buffer) == -1)
@@ -184,13 +184,16 @@ File *getFile(Disk *d, const char *path)
 // um positivo se ocioso ou, caso contrario, 0.
 int myFSIsIdle(Disk *d)
 {
+  // A variável i anda por todos os file descriptors
 	for (int i = 0; i < MAX_FDS; i++)
 	{
+    // Se o arquivo de file descriptor i NÃO for nulo e estiver em um disco ele NÃO está "idle"
 		if (files[i] != NULL && diskGetId(d) == diskGetId(files[i]->disk))
 		{
 			return 0;
 		}
 	}
+  // Caso contrário está "idle"
 	return 1;
 }
 
@@ -201,27 +204,22 @@ int myFSIsIdle(Disk *d)
 int myFSFormat(Disk *d, unsigned int blockSize)
 {
 	unsigned char superblock[DISK_SECTORDATASIZE] = {0};
-
+  
 	ul2char(blockSize, &superblock[SUPER_BLOCKSIZE]); // funçao para conversao de um unsigned int para um array de bytes
 	superblock[SUPERBLOCK_FSID] = fsInfo->fsid;
-
 	unsigned int numInodes = (diskGetSize(d) / blockSize) / 8;
-
 	for(int i=1; i<=numInodes; i++) {
 		Inode* inode = inodeCreate(i, d);
 		if(inode == NULL)
 			return -1;
 		free(inode);
 	}
-
 	unsigned int freeSpaceSector = inodeAreaBeginSector() + numInodes / inodeNumInodesPerSector();
 	unsigned int freeSpaceSize = 1 + (diskGetSize(d) / blockSize) / (sizeof(unsigned char) * 8 * DISK_SECTORDATASIZE);
 
 	ul2char(freeSpaceSector, &superblock[SUPER_FREE_SPACE_SECTOR]);
-
 	unsigned int firstBlockSector = freeSpaceSector + freeSpaceSize;
 	unsigned int numBlocks = (diskGetNumSectors(d) - firstBlockSector) / (blockSize / DISK_SECTORDATASIZE);
-
 	ul2char(firstBlockSector, &superblock[SUPER_FIRST_BLOCK_SECTOR]);
 	ul2char(numBlocks, &superblock[SUPER_NUM_BLOCKS]);
 
@@ -349,69 +347,89 @@ int myFSRead(int fd, char *buf, unsigned int nbytes)
 // efetivamente escritos em caso de sucesso ou -1, caso contrario
 int myFSWrite(int fd, const char *buf, unsigned int nbytes)
 {
-	if (fd <= 0 || fd > MAX_FDS)
-		return -1;
+	printf("\nFD: %u", fd);
+    printf("\nNbytes: %u\n", nbytes);
+    if (fd <= 0 || fd > MAX_FDS) {
+        printf("Retornou 1");
+        return -1;
+    }
 
-	File *file = files[fd];
-	if (!file)
-		return -1;
+    File *file = files[fd-1];
+    printf("antes de a");
+    for(int i=0; i<10; i++) {
+        printf("a");
+        printf("i: %u", files[i]->fd);
+    }
+    if (!file) {
+        printf("Retornou 2");
+        return -1;
+    }
 
-	unsigned int fileSize = inodeGetFileSize(file->inode);
-	unsigned int bytesWritten = 0;
-	unsigned int currentInodeBlockNum = file->lastByteRead / file->blocksize;
-	unsigned int offset = file->lastByteRead % file->blocksize;
-	unsigned int currentBlock = inodeGetBlockAddr(file->inode, currentInodeBlockNum);
-	unsigned char diskBuffer[DISK_SECTORDATASIZE];
+    unsigned int fileSize = inodeGetFileSize(file->inode);
+    unsigned int bytesWritten = 0;
+    unsigned int currentInodeBlockNum = file->lastByteRead / file->blocksize;
+    unsigned int offset = file->lastByteRead % file->blocksize;
+    unsigned int currentBlock = inodeGetBlockAddr(file->inode, currentInodeBlockNum);
+    unsigned char diskBuffer[DISK_SECTORDATASIZE];
 
-	while (bytesWritten < nbytes)
-	{
-		unsigned int sectorsPreBlock = file->blocksize / DISK_SECTORDATASIZE;
-		unsigned int firstSector = offset / DISK_SECTORDATASIZE;
-		unsigned int firstByteInSector = offset % DISK_SECTORDATASIZE;
+    while (bytesWritten < nbytes)
+    {
+        unsigned int sectorsPreBlock = file->blocksize / DISK_SECTORDATASIZE;
+        unsigned int firstSector = offset / DISK_SECTORDATASIZE;
+        unsigned int firstByteInSector = offset % DISK_SECTORDATASIZE;
 
-		if (currentBlock == 0)
-		{
-			currentBlock = findFreeBlock(file->disk);
+        if (currentBlock == 0)
+        {
+            currentBlock = findFreeBlock(file->disk);
 
-			if (currentBlock == -1)
-				break;
+            if (currentBlock == -1)
+                break;
 
-			if (inodeAddBlock(file->inode, currentBlock) == -1)
-			{
-				setBlockFree(file->disk, currentBlock);
-				break;
-			}
-		}
+            if (inodeAddBlock(file->inode, currentBlock) == -1)
+            {
+                setBlockFree(file->disk, currentBlock);
+                break;
+            }
+        }
 
-		for (int i = firstSector; i < sectorsPreBlock && bytesWritten < nbytes; i++)
-		{
-			if (diskReadSector(file->disk, currentBlock + i, diskBuffer) == -1)
-				return -1;
+        for (int i = firstSector; i < sectorsPreBlock && bytesWritten < nbytes; i++)
+        {
+            if (diskReadSector(file->disk, currentBlock + i, diskBuffer) == -1)
+                return -1;
+            int pathLength = strlen(file->path);
+            // for (int j = firstByteInSector; j < DISK_SECTORDATASIZE && bytesWritten < nbytes; j++)
+            // {
+            //  diskBuffer[j] = buf[bytesWritten];
+            //  bytesWritten++;
+            // }
+            for (int j = firstByteInSector; j < DISK_SECTORDATASIZE && bytesWritten < nbytes; j++)
+            {
+                diskBuffer[j] = file->path[bytesWritten % pathLength];
+                bytesWritten++;
+            }
+            printf("\nBytes written1: %u", bytesWritten);
 
-			for (int j = firstByteInSector; j < DISK_SECTORDATASIZE && bytesWritten < nbytes; j++)
-			{
-				diskBuffer[j] = buf[bytesWritten];
-				bytesWritten++;
-			}
 
-			if (diskWriteSector(file->disk, currentBlock + i, diskBuffer) == -1)
-				return -1;
+            if (diskWriteSector(file->disk, currentBlock + i, diskBuffer) == -1)
+                return -1;
 
-			firstByteInSector = 0;
-		}
+            firstByteInSector = 0;
+        }
+        printf("\nBytes written2: %u", bytesWritten);
+        offset = 0;
+        currentInodeBlockNum++;
+        currentBlock = inodeGetBlockAddr(file->inode, currentInodeBlockNum);
+    }
 
-		offset = 0;
-		currentInodeBlockNum++;
-		currentBlock = inodeGetBlockAddr(file->inode, currentInodeBlockNum);
-	}
+    file->lastByteRead += bytesWritten;
+    if (file->lastByteRead >= fileSize)
+    {
+        inodeSetFileSize(file->inode, currentInodeBlockNum);
+        inodeSave(file->inode);
+    }
+    printf("\nBytes written3: %u", bytesWritten);
 
-	file->lastByteRead += bytesWritten;
-	if (file->lastByteRead >= fileSize)
-	{
-		inodeSetFileSize(file->inode, currentInodeBlockNum);
-		inodeSave(file->inode);
-	}
-	return bytesWritten;
+    return bytesWritten;
 }
 
 // Funcao para fechar um arquivo, a partir de um descritor de arquivo
@@ -421,13 +439,13 @@ int myFSClose(int fd)
 	if (fd <= 0 || fd > MAX_FDS)
 		return -1;
 
-	File *file = files[fd];
+	File *file = files[fd-1];
 	if (!file)
 		return -1;
 
-	files[fd - 1] = NULL;
 	free(file->inode);
 	free(file);
+	files[fd - 1] = NULL;
 
 	return 0;
 }
@@ -438,15 +456,24 @@ int myFSClose(int fd)
 // Caso contrario, retorna -1
 int installMyFS(void)
 {
-	FSInfo *fs_info = (FSInfo *)malloc(sizeof(FSInfo));
-    fs_info->fsname = fsname;
-    fs_info->fsid = fsid;
-    fs_info->closeFn = myFSClose;
-    fs_info->formatFn = myFSFormat;
-    fs_info->isidleFn = myFSIsIdle;
-    fs_info->openFn = myFSOpen;
-    fs_info->readFn = myFSRead;
-    fs_info->writeFn = myFSWrite;
-    myFSslot = vfsRegisterFS(fs_info);
-    return myFSslot;
+	// FSInfo *fs_info = (FSInfo *)malloc(sizeof(FSInfo));
+  //   fs_info->fsname = fsname;
+  //   fs_info->fsid = fsid;
+  //   fs_info->closeFn = myFSClose;
+  //   fs_info->formatFn = myFSFormat;
+  //   fs_info->isidleFn = myFSIsIdle;
+  //   fs_info->openFn = myFSOpen;
+  //   fs_info->readFn = myFSRead;
+  //   fs_info->writeFn = myFSWrite;
+  //   myFSslot = vfsRegisterFS(fs_info);
+  //   return myFSslot;
+  fsInfo = malloc(sizeof(FSInfo));
+	fsInfo->fsname = "HelloFileSystem";
+	fsInfo->fsid = (char)vfsRegisterFS(fsInfo);
+	fsInfo->isidleFn = myFSIsIdle;
+	fsInfo->formatFn = myFSFormat;
+	fsInfo->openFn = myFSOpen;
+	fsInfo->readFn = myFSRead;
+	fsInfo->writeFn = myFSWrite;
+	fsInfo->closeFn = myFSClose;
 }
