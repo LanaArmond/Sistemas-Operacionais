@@ -45,7 +45,7 @@ char *fsname = "Matrix";
 
 // Declarações Globais
 FSInfo *fsInfo;
-File *files[MAX_FDS];
+File *files[128];
 int myFSslot;
 
 // _______________________________ Funções Auxiliares _______________________________ //
@@ -280,6 +280,8 @@ int myFSOpen(Disk *d, const char *path)
 		file->path = path;
 		file->inode = inode;
 		file->fd = inodeGetNumber(inode);
+    file->blocksize = 1024;
+    file->lastByteRead = 0;
 		files[file->fd - 1] = file;
 	}
 
@@ -295,7 +297,7 @@ int myFSRead(int fd, char *buf, unsigned int nbytes)
 	if (fd < 0 || fd >= MAX_FDS)
 		return -1;
 
-	File *file = files[fd];
+	File *file = files[fd-1];
 	if (file == NULL)
 		return -1;
 
@@ -306,18 +308,23 @@ int myFSRead(int fd, char *buf, unsigned int nbytes)
 	unsigned int currentBlock = inodeGetBlockAddr(file->inode, currentInodeBlockNum);
 	unsigned char diskBuffer[DISK_SECTORDATASIZE];
 
+
+
+  //printf("bytesRead: %u, nbytes: %u, lastRead: %u, filesize: %u, currentBlock: %u", bytesRead, nbytes, file->lastByteRead, fileSize, currentBlock);
 	while (bytesRead < nbytes &&
 		   bytesRead + file->lastByteRead < fileSize &&
 		   currentBlock > 0)
 	{
+    
 		unsigned int sectorsPerBlock = file->blocksize / DISK_SECTORDATASIZE;
 		unsigned int firstSector = offset / DISK_SECTORDATASIZE;
 		unsigned int firstByteInSector = offset % DISK_SECTORDATASIZE;
-
-		for (int i = firstSector; i < sectorsPerBlock && bytesRead < nbytes; i++)
+    
+		for (int i = firstSector; i / DISK_SECTORDATASIZE < sectorsPerBlock && bytesRead < nbytes; i++)
 		{
 			if (diskReadSector(file->disk, currentBlock + i, diskBuffer) == -1)
 				return -1;
+
 
 			for (int j = firstByteInSector; j < DISK_SECTORDATASIZE &&
 											bytesRead < nbytes &&
@@ -347,21 +354,14 @@ int myFSRead(int fd, char *buf, unsigned int nbytes)
 // efetivamente escritos em caso de sucesso ou -1, caso contrario
 int myFSWrite(int fd, const char *buf, unsigned int nbytes)
 {
-	printf("\nFD: %u", fd);
-    printf("\nNbytes: %u\n", nbytes);
     if (fd <= 0 || fd > MAX_FDS) {
-        printf("Retornou 1");
         return -1;
     }
 
+
     File *file = files[fd-1];
-    printf("antes de a");
-    for(int i=0; i<10; i++) {
-        printf("a");
-        printf("i: %u", files[i]->fd);
-    }
+
     if (!file) {
-        printf("Retornou 2");
         return -1;
     }
 
@@ -397,37 +397,25 @@ int myFSWrite(int fd, const char *buf, unsigned int nbytes)
             if (diskReadSector(file->disk, currentBlock + i, diskBuffer) == -1)
                 return -1;
             int pathLength = strlen(file->path);
-            // for (int j = firstByteInSector; j < DISK_SECTORDATASIZE && bytesWritten < nbytes; j++)
-            // {
-            //  diskBuffer[j] = buf[bytesWritten];
-            //  bytesWritten++;
-            // }
             for (int j = firstByteInSector; j < DISK_SECTORDATASIZE && bytesWritten < nbytes; j++)
             {
                 diskBuffer[j] = file->path[bytesWritten % pathLength];
                 bytesWritten++;
             }
-            printf("\nBytes written1: %u", bytesWritten);
-
 
             if (diskWriteSector(file->disk, currentBlock + i, diskBuffer) == -1)
                 return -1;
 
             firstByteInSector = 0;
         }
-        printf("\nBytes written2: %u", bytesWritten);
+
         offset = 0;
         currentInodeBlockNum++;
         currentBlock = inodeGetBlockAddr(file->inode, currentInodeBlockNum);
     }
 
-    file->lastByteRead += bytesWritten;
-    if (file->lastByteRead >= fileSize)
-    {
-        inodeSetFileSize(file->inode, currentInodeBlockNum);
-        inodeSave(file->inode);
-    }
-    printf("\nBytes written3: %u", bytesWritten);
+    inodeSetFileSize(file->inode, fileSize+bytesWritten);
+    inodeSave(file->inode);
 
     return bytesWritten;
 }
@@ -456,17 +444,6 @@ int myFSClose(int fd)
 // Caso contrario, retorna -1
 int installMyFS(void)
 {
-	// FSInfo *fs_info = (FSInfo *)malloc(sizeof(FSInfo));
-  //   fs_info->fsname = fsname;
-  //   fs_info->fsid = fsid;
-  //   fs_info->closeFn = myFSClose;
-  //   fs_info->formatFn = myFSFormat;
-  //   fs_info->isidleFn = myFSIsIdle;
-  //   fs_info->openFn = myFSOpen;
-  //   fs_info->readFn = myFSRead;
-  //   fs_info->writeFn = myFSWrite;
-  //   myFSslot = vfsRegisterFS(fs_info);
-  //   return myFSslot;
   fsInfo = malloc(sizeof(FSInfo));
 	fsInfo->fsname = "HelloFileSystem";
 	fsInfo->fsid = (char)vfsRegisterFS(fsInfo);
