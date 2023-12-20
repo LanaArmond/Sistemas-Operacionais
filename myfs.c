@@ -2,9 +2,9 @@
 *  myfs.c - Implementacao do sistema de arquivos MyFS
 *
 *  Autores: * Ana Beatriz Lana Maciel Moreira Armond (202165501B)
-*             Gabriella Cruz e Silva ( )
-*             Rayssa Amaral ( )
-*             Davi Kirchmaier ( )
+*             Davi Kirchmaier Paiva (202176021)
+*             Gabriella Cruz e Silva (202165512N)
+*             Rayssa Amaral Gomes (202265194AB)
 *  Projeto: Trabalho Pratico II - Sistemas Operacionais
 *  Organizacao: Universidade Federal de Juiz de Fora
 *  Departamento: Dep. Ciencia da Computacao
